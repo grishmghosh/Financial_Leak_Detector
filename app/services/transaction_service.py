@@ -54,3 +54,16 @@ async def get_transaction_by_voucher(conn, voucher_number: str) -> TransactionRe
     if row is None:
         return None
     return TransactionResponse(**dict(row))
+
+
+async def get_high_risk_transactions(conn, threshold: float = 0.6) -> list[TransactionResponse]:
+    rows = await conn.fetch(
+        """
+        SELECT voucher_number, amount, check_date, department, description, leak_probability
+        FROM transactions
+        WHERE leak_probability >= $1
+        ORDER BY leak_probability DESC
+        """,
+        threshold,
+    )
+    return [TransactionResponse(**dict(row)) for row in rows]

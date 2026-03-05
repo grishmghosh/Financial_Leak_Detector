@@ -1,16 +1,24 @@
+from app.ml.feature_engineering import extract_transaction_features
+
+
 def score_transaction(transaction) -> float:
+    features = extract_transaction_features(transaction)
+
     score = 0.05
 
-    if transaction.amount > 100_000:
+    if features["is_large_transaction"]:
         score += 0.25
 
-    if transaction.department and transaction.department.lower() == "procurement":
+    if features["is_procurement"]:
         score += 0.15
 
-    if transaction.description:
-        keywords = {"urgent", "manual", "adjustment"}
-        description_lower = transaction.description.lower()
-        if any(word in description_lower for word in keywords):
-            score += 0.2
+    if features["description_contains_urgent"]:
+        score += 0.15
+
+    if features["description_contains_manual"]:
+        score += 0.15
+
+    if features["description_contains_adjustment"]:
+        score += 0.1
 
     return min(score, 0.95)
