@@ -19,5 +19,6 @@ class TransactionCreate(TransactionBase):
 
 class TransactionResponse(TransactionBase):
     leak_probability: Optional[float] = None
+    risk_factors: list[str] | None = None
 
     model_config = {"from_attributes": True}

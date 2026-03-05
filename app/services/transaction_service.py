@@ -39,7 +39,7 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
     department_avg_amount = float(dept_stats["avg_amount"]) if dept_stats["avg_amount"] is not None else 0.0
     department_std_amount = float(dept_stats["std_amount"]) if dept_stats["std_amount"] is not None else 0.0
 
-    leak_probability = score_transaction(
+    leak_probability, risk_factors = score_transaction(
         transaction,
         recent_transaction_count,
         department_avg_amount,
@@ -56,7 +56,7 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
         leak_probability,
         transaction.voucher_number,
     )
-    return TransactionResponse(**dict(row))
+    return TransactionResponse(**dict(row), risk_factors=risk_factors)
 
 
 async def list_transactions(conn) -> list[TransactionResponse]:
@@ -94,4 +94,57 @@ async def get_high_risk_transactions(conn, threshold: float = 0.6) -> list[Trans
         """,
         threshold,
     )
+    return [TransactionResponse(**dict(row)) for row in rows]
+
+
+async def search_transactions(
+    conn,
+    department: str | None = None,
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    min_risk: float | None = None,
+) -> list[TransactionResponse]:
+    query = """
+        SELECT voucher_number, amount, check_date, department, description, leak_probability
+        FROM transactions
+        WHERE 1=1
+    """
+    params = []
+    idx = 1
+
+    if department is not None:
+        query += f" AND department = ${idx}"
+        params.append(department)
+        idx += 1
+
+    if min_amount is not None:
+        query += f" AND amount >= ${idx}"
+        params.append(min_amount)
+        idx += 1
+
+    if max_amount is not None:
+        query += f" AND amount <= ${idx}"
+        params.append(max_amount)
+        idx += 1
+
+    if start_date is not None:
+        query += f" AND check_date >= ${idx}"
+        params.append(start_date)
+        idx += 1
+
+    if end_date is not None:
+        query += f" AND check_date <= ${idx}"
+        params.append(end_date)
+        idx += 1
+
+    if min_risk is not None:
+        query += f" AND leak_probability >= ${idx}"
+        params.append(min_risk)
+        idx += 1
+
+    query += " ORDER BY check_date DESC"
+
+    rows = await conn.fetch(query, *params)
     return [TransactionResponse(**dict(row)) for row in rows]

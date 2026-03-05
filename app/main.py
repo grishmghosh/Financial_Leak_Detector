@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse
 from app.db.connection import init_db, close_db
 from app.core.tenant import apply_tenant_context
 from app.core.exceptions import register_exception_handlers
+from app.routers.transactions import router as transactions_router
+from app.routers.analytics import router as analytics_router
 
 
 @asynccontextmanager
@@ -36,6 +38,8 @@ protected_router = APIRouter(
 
 # API router (business routes live here)
 api_router = APIRouter()
+api_router.include_router(transactions_router)
+api_router.include_router(analytics_router)
 
 # Attach api_router to protected_router with prefix
 protected_router.include_router(api_router, prefix="/api")

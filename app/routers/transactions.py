@@ -7,6 +7,7 @@ from app.services.transaction_service import (
     get_high_risk_transactions,
     get_transaction_by_voucher,
     list_transactions,
+    search_transactions,
 )
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -26,6 +27,27 @@ async def get_high_risk_transactions_endpoint(
     conn=Depends(get_db),
 ) -> list[TransactionResponse]:
     return await get_high_risk_transactions(conn, threshold)
+
+
+@router.get("/search", response_model=list[TransactionResponse])
+async def search_transactions_endpoint(
+    department: str | None = None,
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    min_risk: float | None = None,
+    conn=Depends(get_db),
+) -> list[TransactionResponse]:
+    return await search_transactions(
+        conn,
+        department=department,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        start_date=start_date,
+        end_date=end_date,
+        min_risk=min_risk,
+    )
 
 
 @router.get("/", response_model=list[TransactionResponse])
