@@ -1,5 +1,9 @@
+import logging
+
 from app.ml.feature_engineering import extract_transaction_features
 from app.ml.model_loader import score_transaction as ml_score_transaction
+
+logger = logging.getLogger(__name__)
 
 
 def score_transaction(
@@ -40,5 +44,11 @@ def score_transaction(
 
     ml_score = ml_score_transaction(features)
     score = ml_score
+
+    logger.debug(
+        "Scored transaction — risk=%.4f, factors=%s",
+        score,
+        risk_factors,
+    )
 
     return score, risk_factors

@@ -1,7 +1,11 @@
+import logging
+
 import joblib
 from pathlib import Path
 
 from app.ml.model import LeakDetectionModel
+
+logger = logging.getLogger(__name__)
 
 MODEL_PATH = Path("models/isolation_forest.pkl")
 
@@ -21,6 +25,7 @@ def get_model():
     model = LeakDetectionModel()
     model.model = joblib.load(MODEL_PATH)
     _model_instance = model
+    logger.info("Loaded ML model from %s", MODEL_PATH)
     return _model_instance
 
 

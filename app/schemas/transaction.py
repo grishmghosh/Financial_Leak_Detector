@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import date
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -14,10 +15,11 @@ class TransactionBase(BaseModel):
 
 
 class TransactionCreate(TransactionBase):
-    pass
+    org_id: UUID
 
 
 class TransactionResponse(TransactionBase):
+    org_id: UUID
     leak_probability: Optional[float] = None
     risk_factors: list[str] | None = None
 

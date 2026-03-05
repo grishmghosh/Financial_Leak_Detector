@@ -1,7 +1,12 @@
+import logging
+
 from app.schemas.analytics import RiskSummaryResponse
+
+logger = logging.getLogger(__name__)
 
 
 async def get_risk_summary(conn) -> RiskSummaryResponse:
+    logger.info("Computing risk summary")
     total_transactions = await conn.fetchval(
         "SELECT COUNT(*) FROM transactions"
     )
@@ -35,6 +40,7 @@ async def get_risk_summary(conn) -> RiskSummaryResponse:
 
 
 async def get_model_health(conn) -> dict:
+    logger.info("Computing model health metrics")
     row = await conn.fetchrow(
         """
         SELECT

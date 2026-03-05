@@ -1,15 +1,21 @@
+import logging
+
 from app.ml.scoring_engine import score_transaction
 from app.schemas.transaction import TransactionCreate, TransactionResponse
 
+logger = logging.getLogger(__name__)
+
 
 async def create_transaction(conn, transaction: TransactionCreate) -> TransactionResponse:
+    logger.info("Creating transaction %s for org %s", transaction.voucher_number, transaction.org_id)
     await conn.execute(
         """
         INSERT INTO transactions
-        (voucher_number, amount, check_date, department, description)
-        VALUES ($1, $2, $3, $4, $5)
+        (voucher_number, org_id, amount, check_date, department, description)
+        VALUES ($1, $2, $3, $4, $5, $6)
         """,
         transaction.voucher_number,
+        transaction.org_id,
         transaction.amount,
         transaction.check_date,
         transaction.department,
@@ -21,9 +27,11 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
         SELECT COUNT(*)
         FROM transactions
         WHERE department = $1
+        AND org_id = $2
         AND check_date >= NOW() - INTERVAL '1 hour'
         """,
         transaction.department,
+        transaction.org_id,
     )
 
     dept_stats = await conn.fetchrow(
@@ -33,8 +41,10 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
             STDDEV(amount) AS std_amount
         FROM transactions
         WHERE department = $1
+        AND org_id = $2
         """,
         transaction.department,
+        transaction.org_id,
     )
     department_avg_amount = float(dept_stats["avg_amount"]) if dept_stats["avg_amount"] is not None else 0.0
     department_std_amount = float(dept_stats["std_amount"]) if dept_stats["std_amount"] is not None else 0.0
@@ -50,19 +60,21 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
         """
         UPDATE transactions
         SET leak_probability = $1
-        WHERE voucher_number = $2
-        RETURNING voucher_number, amount, check_date, department, description, leak_probability
+        WHERE voucher_number = $2 AND org_id = $3
+        RETURNING voucher_number, org_id, amount, check_date, department, description, leak_probability
         """,
         leak_probability,
         transaction.voucher_number,
+        transaction.org_id,
     )
+    logger.info("Scored transaction %s — risk %.4f", transaction.voucher_number, leak_probability)
     return TransactionResponse(**dict(row), risk_factors=risk_factors)
 
 
 async def list_transactions(conn, limit: int = 50, offset: int = 0) -> list[TransactionResponse]:
     rows = await conn.fetch(
         """
-        SELECT voucher_number, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
         FROM transactions
         ORDER BY check_date DESC
         LIMIT $1 OFFSET $2
@@ -76,7 +88,7 @@ async def list_transactions(conn, limit: int = 50, offset: int = 0) -> list[Tran
 async def get_transaction_by_voucher(conn, voucher_number: str) -> TransactionResponse | None:
     row = await conn.fetchrow(
         """
-        SELECT voucher_number, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
         FROM transactions
         WHERE voucher_number = $1
         """,
@@ -90,7 +102,7 @@ async def get_transaction_by_voucher(conn, voucher_number: str) -> TransactionRe
 async def get_high_risk_transactions(conn, threshold: float = 0.6) -> list[TransactionResponse]:
     rows = await conn.fetch(
         """
-        SELECT voucher_number, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
         FROM transactions
         WHERE leak_probability >= $1
         ORDER BY leak_probability DESC
@@ -112,7 +124,7 @@ async def search_transactions(
     offset: int = 0,
 ) -> list[TransactionResponse]:
     query = """
-        SELECT voucher_number, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
         FROM transactions
         WHERE 1=1
     """

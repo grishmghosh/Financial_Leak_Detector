@@ -1,22 +1,46 @@
+import logging
+
 import numpy as np
 
 from app.ml.feature_engineering import extract_transaction_features
 from app.ml.model import LeakDetectionModel
 
+logger = logging.getLogger(__name__)
 
-async def build_training_dataset(conn):
-    rows = await conn.fetch(
-        """
-        SELECT
-            voucher_number,
-            amount,
-            check_date,
-            department,
-            description,
-            leak_probability
-        FROM transactions
-        """
-    )
+
+async def build_training_dataset(conn, org_id=None):
+    logger.info("Building training dataset (org_id=%s)", org_id)
+
+    if org_id is not None:
+        rows = await conn.fetch(
+            """
+            SELECT
+                voucher_number,
+                org_id,
+                amount,
+                check_date,
+                department,
+                description,
+                leak_probability
+            FROM transactions
+            WHERE org_id = $1
+            """,
+            org_id,
+        )
+    else:
+        rows = await conn.fetch(
+            """
+            SELECT
+                voucher_number,
+                org_id,
+                amount,
+                check_date,
+                department,
+                description,
+                leak_probability
+            FROM transactions
+            """
+        )
 
     model = LeakDetectionModel()
     dataset = []
@@ -39,4 +63,5 @@ async def build_training_dataset(conn):
         dataset.append(vector)
 
     X = np.array(dataset)
+    logger.info("Built dataset with %d samples", len(X))
     return X
