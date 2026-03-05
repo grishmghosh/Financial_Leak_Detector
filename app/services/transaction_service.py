@@ -16,7 +16,35 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
         transaction.description,
     )
 
-    leak_probability = score_transaction(transaction)
+    recent_transaction_count = await conn.fetchval(
+        """
+        SELECT COUNT(*)
+        FROM transactions
+        WHERE department = $1
+        AND check_date >= NOW() - INTERVAL '1 hour'
+        """,
+        transaction.department,
+    )
+
+    dept_stats = await conn.fetchrow(
+        """
+        SELECT
+            AVG(amount) AS avg_amount,
+            STDDEV(amount) AS std_amount
+        FROM transactions
+        WHERE department = $1
+        """,
+        transaction.department,
+    )
+    department_avg_amount = float(dept_stats["avg_amount"]) if dept_stats["avg_amount"] is not None else 0.0
+    department_std_amount = float(dept_stats["std_amount"]) if dept_stats["std_amount"] is not None else 0.0
+
+    leak_probability = score_transaction(
+        transaction,
+        recent_transaction_count,
+        department_avg_amount,
+        department_std_amount,
+    )
 
     row = await conn.fetchrow(
         """
