@@ -13,6 +13,11 @@ def get_model():
     if _model_instance is not None:
         return _model_instance
 
+    if not MODEL_PATH.exists():
+        raise RuntimeError(
+            "Trained model not found. Run `python -m app.ml.train_model` first."
+        )
+
     model = LeakDetectionModel()
     model.model = joblib.load(MODEL_PATH)
     _model_instance = model

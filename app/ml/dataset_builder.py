@@ -1,4 +1,3 @@
-import asyncio
 import numpy as np
 
 from app.ml.feature_engineering import extract_transaction_features

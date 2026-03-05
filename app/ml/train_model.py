@@ -1,5 +1,6 @@
 import asyncio
 import joblib
+from pathlib import Path
 
 from app.db.connection import get_pool
 from app.ml.dataset_builder import build_training_dataset
@@ -18,6 +19,7 @@ async def train_model():
     model = LeakDetectionModel()
     model.model.fit(X)
 
+    Path("models").mkdir(exist_ok=True)
     joblib.dump(model.model, "models/isolation_forest.pkl")
 
 

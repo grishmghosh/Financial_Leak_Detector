@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+asyncpg
+pydantic
+pydantic-settings
+python-jose[cryptography]
+numpy
+scikit-learn
+joblib
