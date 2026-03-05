@@ -32,3 +32,26 @@ async def get_risk_summary(conn) -> RiskSummaryResponse:
         average_risk_score=float(average_risk_score) if average_risk_score is not None else 0.0,
         top_risky_departments=top_risky_departments,
     )
+
+
+async def get_model_health(conn) -> dict:
+    row = await conn.fetchrow(
+        """
+        SELECT
+            COUNT(*) AS total_transactions,
+            AVG(leak_probability) AS average_risk_score,
+            SUM(CASE WHEN leak_probability >= 0.6 THEN 1 ELSE 0 END) AS high_risk_transactions
+        FROM transactions
+        """
+    )
+
+    total_transactions = row["total_transactions"] or 0
+    average_risk_score = float(row["average_risk_score"]) if row["average_risk_score"] is not None else 0.0
+    high_risk_transactions = row["high_risk_transactions"] or 0
+    high_risk_ratio = high_risk_transactions / total_transactions if total_transactions > 0 else 0.0
+
+    return {
+        "transactions_scored": total_transactions,
+        "average_risk_score": average_risk_score,
+        "high_risk_ratio": float(high_risk_ratio),
+    }

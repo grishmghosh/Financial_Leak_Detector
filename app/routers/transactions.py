@@ -37,6 +37,8 @@ async def search_transactions_endpoint(
     start_date: str | None = None,
     end_date: str | None = None,
     min_risk: float | None = None,
+    limit: int = 50,
+    offset: int = 0,
     conn=Depends(get_db),
 ) -> list[TransactionResponse]:
     return await search_transactions(
@@ -47,14 +49,18 @@ async def search_transactions_endpoint(
         start_date=start_date,
         end_date=end_date,
         min_risk=min_risk,
+        limit=limit,
+        offset=offset,
     )
 
 
 @router.get("/", response_model=list[TransactionResponse])
 async def list_transactions_endpoint(
+    limit: int = 50,
+    offset: int = 0,
     conn=Depends(get_db),
 ) -> list[TransactionResponse]:
-    return await list_transactions(conn)
+    return await list_transactions(conn, limit=limit, offset=offset)
 
 
 @router.get("/{voucher_number}", response_model=TransactionResponse)

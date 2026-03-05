@@ -59,13 +59,16 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
     return TransactionResponse(**dict(row), risk_factors=risk_factors)
 
 
-async def list_transactions(conn) -> list[TransactionResponse]:
+async def list_transactions(conn, limit: int = 50, offset: int = 0) -> list[TransactionResponse]:
     rows = await conn.fetch(
         """
         SELECT voucher_number, amount, check_date, department, description, leak_probability
         FROM transactions
         ORDER BY check_date DESC
-        """
+        LIMIT $1 OFFSET $2
+        """,
+        limit,
+        offset,
     )
     return [TransactionResponse(**dict(row)) for row in rows]
 
@@ -105,6 +108,8 @@ async def search_transactions(
     start_date: str | None = None,
     end_date: str | None = None,
     min_risk: float | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[TransactionResponse]:
     query = """
         SELECT voucher_number, amount, check_date, department, description, leak_probability
@@ -145,6 +150,10 @@ async def search_transactions(
         idx += 1
 
     query += " ORDER BY check_date DESC"
+
+    query += f" LIMIT ${idx} OFFSET ${idx + 1}"
+    params.append(limit)
+    params.append(offset)
 
     rows = await conn.fetch(query, *params)
     return [TransactionResponse(**dict(row)) for row in rows]

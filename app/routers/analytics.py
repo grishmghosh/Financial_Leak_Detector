@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.db.connection import get_db
 from app.schemas.analytics import RiskSummaryResponse
-from app.services.analytics_service import get_risk_summary
+from app.services.analytics_service import get_model_health, get_risk_summary
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -12,3 +12,10 @@ async def get_risk_summary_endpoint(
     conn=Depends(get_db),
 ) -> RiskSummaryResponse:
     return await get_risk_summary(conn)
+
+
+@router.get("/model-health")
+async def get_model_health_endpoint(
+    conn=Depends(get_db),
+):
+    return await get_model_health(conn)

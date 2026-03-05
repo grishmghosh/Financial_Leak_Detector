@@ -1,4 +1,5 @@
 from app.ml.feature_engineering import extract_transaction_features
+from app.ml.model_loader import score_transaction as ml_score_transaction
 
 
 def score_transaction(
@@ -14,35 +15,30 @@ def score_transaction(
         department_std_amount,
     )
 
-    score = 0.05
     risk_factors = []
 
     if features["is_large_transaction"]:
-        score += 0.25
         risk_factors.append("large_transaction")
 
     if features["is_procurement"]:
-        score += 0.15
         risk_factors.append("procurement_department")
 
     if features["description_contains_urgent"]:
-        score += 0.15
         risk_factors.append("keyword_urgent")
 
     if features["description_contains_manual"]:
-        score += 0.15
         risk_factors.append("keyword_manual")
 
     if features["description_contains_adjustment"]:
-        score += 0.1
         risk_factors.append("keyword_adjustment")
 
     if features["transaction_count_last_hour"] > 5:
-        score += 0.2
         risk_factors.append("high_transaction_frequency")
 
     if abs(features["amount_zscore"]) > 3:
-        score += 0.25
         risk_factors.append("department_spending_outlier")
 
-    return (min(score, 0.95), risk_factors)
+    ml_score = ml_score_transaction(features)
+    score = ml_score
+
+    return score, risk_factors
