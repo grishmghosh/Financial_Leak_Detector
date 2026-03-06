@@ -8,39 +8,24 @@ from app.ml.model import LeakDetectionModel
 logger = logging.getLogger(__name__)
 
 
-async def build_training_dataset(conn, org_id=None):
+async def build_training_dataset(conn, org_id):
     logger.info("Building training dataset (org_id=%s)", org_id)
 
-    if org_id is not None:
-        rows = await conn.fetch(
-            """
-            SELECT
-                voucher_number,
-                org_id,
-                amount,
-                check_date,
-                department,
-                description,
-                leak_probability
-            FROM transactions
-            WHERE org_id = $1
-            """,
+    rows = await conn.fetch(
+        """
+        SELECT
+            voucher_number,
             org_id,
-        )
-    else:
-        rows = await conn.fetch(
-            """
-            SELECT
-                voucher_number,
-                org_id,
-                amount,
-                check_date,
-                department,
-                description,
-                leak_probability
-            FROM transactions
-            """
-        )
+            amount,
+            check_date,
+            department,
+            description,
+            leak_probability
+        FROM transactions
+        WHERE org_id = $1
+        """,
+        org_id,
+    )
 
     model = LeakDetectionModel()
     dataset = []

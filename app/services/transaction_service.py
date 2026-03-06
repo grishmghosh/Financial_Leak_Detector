@@ -11,8 +11,8 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
     await conn.execute(
         """
         INSERT INTO transactions
-        (voucher_number, org_id, amount, check_date, department, description)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        (voucher_number, org_id, amount, check_date, department, description, vendor_name)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         """,
         transaction.voucher_number,
         transaction.org_id,
@@ -20,6 +20,7 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
         transaction.check_date,
         transaction.department,
         transaction.description,
+        transaction.vendor_name,
     )
 
     recent_transaction_count = await conn.fetchval(
@@ -61,7 +62,7 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
         UPDATE transactions
         SET leak_probability = $1
         WHERE voucher_number = $2 AND org_id = $3
-        RETURNING voucher_number, org_id, amount, check_date, department, description, leak_probability
+        RETURNING voucher_number, org_id, amount, check_date, department, description, vendor_name, leak_probability
         """,
         leak_probability,
         transaction.voucher_number,
@@ -74,7 +75,7 @@ async def create_transaction(conn, transaction: TransactionCreate) -> Transactio
 async def list_transactions(conn, limit: int = 50, offset: int = 0) -> list[TransactionResponse]:
     rows = await conn.fetch(
         """
-        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, vendor_name, leak_probability
         FROM transactions
         ORDER BY check_date DESC
         LIMIT $1 OFFSET $2
@@ -88,7 +89,7 @@ async def list_transactions(conn, limit: int = 50, offset: int = 0) -> list[Tran
 async def get_transaction_by_voucher(conn, voucher_number: str) -> TransactionResponse | None:
     row = await conn.fetchrow(
         """
-        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, vendor_name, leak_probability
         FROM transactions
         WHERE voucher_number = $1
         """,
@@ -102,7 +103,7 @@ async def get_transaction_by_voucher(conn, voucher_number: str) -> TransactionRe
 async def get_high_risk_transactions(conn, threshold: float = 0.6) -> list[TransactionResponse]:
     rows = await conn.fetch(
         """
-        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, vendor_name, leak_probability
         FROM transactions
         WHERE leak_probability >= $1
         ORDER BY leak_probability DESC
@@ -124,7 +125,7 @@ async def search_transactions(
     offset: int = 0,
 ) -> list[TransactionResponse]:
     query = """
-        SELECT voucher_number, org_id, amount, check_date, department, description, leak_probability
+        SELECT voucher_number, org_id, amount, check_date, department, description, vendor_name, leak_probability
         FROM transactions
         WHERE 1=1
     """

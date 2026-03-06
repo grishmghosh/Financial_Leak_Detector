@@ -12,6 +12,7 @@ class TransactionBase(BaseModel):
     check_date: date
     department: str
     description: Optional[str] = None
+    vendor_name: Optional[str] = None
 
 
 class TransactionCreate(TransactionBase):

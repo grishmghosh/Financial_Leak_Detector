@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # --- Optional (sensible default provided) ---
     ENVIRONMENT: str = "development"  # "development" | "staging" | "production"
 
+    # --- ML risk thresholds (tunable via env vars) ---
+    HIGH_RISK_THRESHOLD: float = 0.7
+    MEDIUM_RISK_THRESHOLD: float = 0.4
+
     # Load from .env at the project root; silently ignore any extra vars.
     model_config = SettingsConfigDict(
         env_file=".env",

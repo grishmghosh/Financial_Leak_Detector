@@ -6,7 +6,6 @@ Registers database lifecycle events and exposes a health endpoint.
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import Depends, FastAPI, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +17,7 @@ from app.core.tenant import apply_tenant_context
 from app.core.exceptions import register_exception_handlers
 from app.routers.transactions import router as transactions_router
 from app.routers.analytics import router as analytics_router
+from app.routers.ml import router as ml_router
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ protected_router = APIRouter(
 api_v1_router = APIRouter(prefix="/api/v1")
 api_v1_router.include_router(transactions_router)
 api_v1_router.include_router(analytics_router)
+api_v1_router.include_router(ml_router)
 
 # Attach versioned routes behind tenant protection
 protected_router.include_router(api_v1_router)
@@ -99,7 +100,6 @@ async def health():
 
 
 # ── Public readiness endpoint ───────────────────────────────
-MODEL_PATH = Path("models/isolation_forest.pkl")
 
 
 @app.get("/ready")
@@ -112,15 +112,12 @@ async def ready(request: Request):
     except Exception:
         logger.warning("Readiness check: database unavailable")
 
-    if MODEL_PATH.exists():
-        try:
-            import joblib
-            joblib.load(MODEL_PATH)
-            checks["model"] = True
-        except Exception:
-            logger.warning("Readiness check: model file corrupt or unloadable")
-    else:
-        logger.warning("Readiness check: model file not found at %s", MODEL_PATH)
+    try:
+        from app.ml.model_loader import get_model
+        get_model()
+        checks["model"] = True
+    except Exception:
+        logger.warning("Readiness check: ML model unavailable")
 
     all_ready = all(checks.values())
     status_code = 200 if all_ready else 503
