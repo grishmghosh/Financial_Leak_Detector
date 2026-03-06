@@ -29,3 +29,21 @@ def require_role(required_role: str):
 
 require_admin = require_role("admin")
 require_member = require_role("member")
+
+
+async def get_org_context(
+    user: dict = Depends(get_current_user),
+    db: asyncpg.Connection = Depends(get_db),
+) -> dict:
+    """Return user + org context without enforcing a specific role."""
+    row = await db.fetchrow(
+        "SELECT org_id, role FROM user_organizations WHERE user_id = $1",
+        user["user_id"],
+    )
+    if not row:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return {
+        "user_id": user["user_id"],
+        "org_id": row["org_id"],
+        "role": row["role"],
+    }
