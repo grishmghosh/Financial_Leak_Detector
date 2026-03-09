@@ -1,0 +1,606 @@
+{
+  "name": "LeakWatch ML Automation v2",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "v2-0001-0000-0000-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "notes": "Fires daily at 06:00 UTC. Adjust cron for other schedules (e.g. '0 */6 * * *' every 6 hours, '0 9 * * 1-5' weekdays at 9 AM)."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/ready",
+        "authentication": "none",
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "v2-0001-0000-0000-000000000002",
+      "name": "Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "onError": "continueRegularOutput",
+      "notes": "GET /ready — Checks backend readiness (database + ML model). Uses continueOnFail so a connection error or 503 response flows into the IF node instead of crashing the workflow."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-is-ready",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "ready",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000003",
+      "name": "Is Backend Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "TRUE when /ready returns {status:'ready'}. FALSE covers: backend down (network error), database unavailable (503), or ML model not loaded (503)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/v1/ml/run-analysis",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LEAKWATCH_JWT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "v2-0001-0000-0000-000000000004",
+      "name": "Run Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 300],
+      "onError": "continueRegularOutput",
+      "notes": "POST /api/v1/ml/run-analysis — Triggers background ML scoring. Returns {run_id, status:'running'}. Uses continueOnFail to catch 401 (expired JWT) or 403 (wrong role) gracefully."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-has-run-id",
+              "leftValue": "={{ $json.run_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000005",
+      "name": "Did Analysis Start?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1180, 300],
+      "notes": "Checks for run_id in the response. FALSE means the POST failed (auth error, server error) — fires an alert instead of silently dying."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first().json;\nreturn [{\n  json: {\n    run_id: String(response.run_id),\n    poll_count: 0\n  }\n}];"
+      },
+      "id": "v2-0001-0000-0000-000000000006",
+      "name": "Init Poll State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1420, 300],
+      "notes": "Initialises loop state: stores run_id and sets poll_count to 0. Subsequent iterations increment poll_count in 'Evaluate Status'."
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "v2-0001-0000-0000-000000000007",
+      "name": "Wait Before Poll",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1420, 540],
+      "notes": "30-second pause between status polls. Loop ceiling: 20 iterations × 30s = 10 minutes max."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8000/api/v1/ml/run-status/{{ $('Init Poll State').first().json.run_id }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LEAKWATCH_JWT_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "v2-0001-0000-0000-000000000008",
+      "name": "Check Run Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1660, 540],
+      "notes": "GET /api/v1/ml/run-status/{run_id} — Returns {run_id, status, transactions_scored, high_risk_count, duplicates_found, started_at, completed_at}."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const statusData = $input.first().json;\nconst runId = $('Init Poll State').first().json.run_id;\n\n// Poll count: self-reference for loop iterations, 0 on first pass\nlet prevCount = 0;\ntry {\n  prevCount = $('Evaluate Status').first().json.poll_count;\n} catch {\n  // First iteration — node has no prior output yet\n}\n\nreturn [{\n  json: {\n    run_id: runId,\n    poll_count: prevCount + 1,\n    status: statusData.status ?? 'unknown',\n    high_risk_count: statusData.high_risk_count ?? 0,\n    transactions_scored: statusData.transactions_scored ?? 0,\n    duplicates_found: statusData.duplicates_found ?? 0,\n    started_at: statusData.started_at ?? null,\n    completed_at: statusData.completed_at ?? null\n  }\n}];"
+      },
+      "id": "v2-0001-0000-0000-000000000009",
+      "name": "Evaluate Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1900, 540],
+      "notes": "Merges HTTP response with loop state. Increments poll_count via self-reference (first pass defaults to 0). run_id is always read from Init Poll State to avoid drift."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "completed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputLabel": "Completed"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputLabel": "Failed"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "v2-0001-0000-0000-000000000010",
+      "name": "Route by Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [2140, 540],
+      "notes": "3-way branch: output 0 = 'completed' → evaluate results. Output 1 = 'failed' → immediate error alert. Fallback output = still running → check retry limit."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-has-anomalies",
+              "leftValue": "={{ $json.high_risk_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000011",
+      "name": "Has Anomalies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2380, 300],
+      "notes": "Checks high_risk_count > 0 from the completed run."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/v1/dashboard/high-risk-transactions?limit=20",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LEAKWATCH_JWT_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "v2-0001-0000-0000-000000000012",
+      "name": "Fetch High Risk Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2620, 180],
+      "notes": "GET /api/v1/dashboard/high-risk-transactions?limit=20 — Fetches top 20 high-risk transactions (v1 fetched default 100, wasting bandwidth). Returns: voucher_number, leak_probability, risk_factors, is_duplicate, duplicate_of."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const runData = $('Evaluate Status').first().json;\nconst transactions = $input.all().map(item => item.json);\n\nconst lines = [\n  '\\u{1F6A8} *LeakWatch Anomaly Alert*',\n  '',\n  '*Run Summary*',\n  `\\u2022 Run ID: \\`${runData.run_id}\\``,\n  `\\u2022 Completed: ${runData.completed_at || 'N/A'}`,\n  `\\u2022 Transactions Scored: ${(runData.transactions_scored || 0).toLocaleString()}`,\n  `\\u2022 High Risk Found: *${runData.high_risk_count}*`,\n  `\\u2022 Duplicates Found: ${runData.duplicates_found}`,\n  '',\n  `*Top ${transactions.length} High-Risk Transactions:*`\n];\n\nfor (const txn of transactions) {\n  const prob = (txn.leak_probability || 0).toFixed(3);\n  const factors = (txn.risk_factors || []).join(', ') || 'none';\n  const dup = txn.is_duplicate ? ` \\u26A0\\uFE0F DUP of ${txn.duplicate_of || '?'}` : '';\n  lines.push(`\\u2022 \\`${txn.voucher_number}\\` \\u2014 P=${prob} [${factors}]${dup}`);\n}\n\nif (runData.high_risk_count > transactions.length) {\n  lines.push('', `_\\u2026and ${runData.high_risk_count - transactions.length} more. Review in dashboard._`);\n}\n\nlines.push('', '\\u{1F449} Review immediately in the LeakWatch dashboard.');\n\nreturn [{\n  json: {\n    text: lines.join('\\n'),\n    summary: `LeakWatch: ${runData.high_risk_count} high-risk transactions detected out of ${(runData.transactions_scored || 0).toLocaleString()} scored.`,\n    severity: 'critical',\n    source: 'leakwatch',\n    run_id: runData.run_id,\n    high_risk_count: runData.high_risk_count,\n    transactions_scored: runData.transactions_scored,\n    duplicates_found: runData.duplicates_found,\n    top_transactions: transactions\n  }\n}];"
+      },
+      "id": "v2-0001-0000-0000-000000000013",
+      "name": "Format Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, 180],
+      "notes": "Builds a structured alert with run summary and top N high-risk transactions. Adds severity and source fields. Shows a truncation note when there are more HRTs than fetched."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.text) }},\n  \"summary\": {{ JSON.stringify($json.summary) }},\n  \"severity\": {{ JSON.stringify($json.severity) }},\n  \"source\": \"leakwatch\",\n  \"run_id\": {{ JSON.stringify($json.run_id) }},\n  \"high_risk_count\": {{ $json.high_risk_count }},\n  \"transactions_scored\": {{ $json.transactions_scored }},\n  \"duplicates_found\": {{ $json.duplicates_found }}\n}",
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000014",
+      "name": "Send Anomaly Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3100, 180],
+      "notes": "Sends the anomaly alert to the configured webhook (Slack, Teams, Discord, or custom). Payload includes severity and source fields for downstream filtering."
+    },
+    {
+      "parameters": {},
+      "id": "v2-0001-0000-0000-000000000015",
+      "name": "Log Clean Run",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2620, 420],
+      "notes": "Analysis completed with zero high-risk transactions. No alert sent. This node exists as a clean exit point for audit visibility in the n8n execution log."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"\\u274C *LeakWatch: ML Analysis Failed*\\n\\nRun ID: `{{ $json.run_id }}`\\nStatus: {{ $json.status }}\\nPoll iteration: {{ $json.poll_count }}\\nStarted: {{ $json.started_at || 'N/A' }}\\n\\nThe analysis pipeline encountered an error during execution. Check the FastAPI backend logs for details.\",\n  \"severity\": \"high\",\n  \"source\": \"leakwatch\",\n  \"run_id\": \"{{ $json.run_id }}\"\n}",
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000016",
+      "name": "Send Run Failed Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2380, 740],
+      "notes": "Fires immediately when the ML run reports status='failed'. No more polling — alerts ops to check backend logs."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-max-retries",
+              "leftValue": "={{ $json.poll_count }}",
+              "rightValue": 20,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000017",
+      "name": "Max Retries?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2380, 540],
+      "notes": "Safety valve: poll_count >= 20 (10 minutes). TRUE → timeout alert. FALSE → loop back to Wait for another 30s cycle."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"\\u23F0 *LeakWatch: Analysis Timeout*\\n\\nRun ID: `{{ $json.run_id }}`\\nLast status: {{ $json.status }}\\nPolled {{ $json.poll_count }} times (10 min ceiling reached)\\n\\nThe ML analysis did not complete within the expected window. Check backend performance and logs.\",\n  \"severity\": \"high\",\n  \"source\": \"leakwatch\",\n  \"run_id\": \"{{ $json.run_id }}\"\n}",
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000018",
+      "name": "Send Timeout Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2620, 640],
+      "notes": "Fires after 20 polls (10 min). Includes run_id and last known status so ops can investigate."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"\\u26A0\\uFE0F *LeakWatch: Backend Unavailable*\\n\\nThe scheduled ML analysis was skipped because the backend health check failed.\\n\\nPlease verify:\\n\\u2022 Backend is running at host.docker.internal:8000\\n\\u2022 Database is accessible\\n\\u2022 ML model is loaded\\n\\nThe workflow will retry on the next scheduled run.\",\n  \"severity\": \"high\",\n  \"source\": \"leakwatch\"\n}",
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000019",
+      "name": "Send Backend Down Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 560],
+      "notes": "Fires when /ready returns not_ready or is unreachable. Skips analysis entirely to avoid wasted work."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"\\u26A0\\uFE0F *LeakWatch: Failed to Start Analysis*\\n\\nThe POST /api/v1/ml/run-analysis call failed.\\n\\nPossible causes:\\n\\u2022 Expired or invalid JWT token\\n\\u2022 User does not have admin role\\n\\u2022 Backend returned a server error\\n\\nPlease check the LEAKWATCH_JWT_TOKEN environment variable and backend logs.\",\n  \"severity\": \"high\",\n  \"source\": \"leakwatch\"\n}",
+        "options": {}
+      },
+      "id": "v2-0001-0000-0000-000000000020",
+      "name": "Send Start Error Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 560],
+      "notes": "Fires when run-analysis returns an error (401, 403, 500, or network failure). Catches expired JWT tokens before entering the polling loop."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          { "node": "Health Check", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Health Check": {
+      "main": [
+        [
+          { "node": "Is Backend Ready?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Is Backend Ready?": {
+      "main": [
+        [
+          { "node": "Run Analysis", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Send Backend Down Alert", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Run Analysis": {
+      "main": [
+        [
+          { "node": "Did Analysis Start?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Did Analysis Start?": {
+      "main": [
+        [
+          { "node": "Init Poll State", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Send Start Error Alert", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Init Poll State": {
+      "main": [
+        [
+          { "node": "Wait Before Poll", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Wait Before Poll": {
+      "main": [
+        [
+          { "node": "Check Run Status", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Check Run Status": {
+      "main": [
+        [
+          { "node": "Evaluate Status", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Evaluate Status": {
+      "main": [
+        [
+          { "node": "Route by Status", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Route by Status": {
+      "main": [
+        [
+          { "node": "Has Anomalies?", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Send Run Failed Alert", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Max Retries?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Has Anomalies?": {
+      "main": [
+        [
+          { "node": "Fetch High Risk Transactions", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Log Clean Run", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch High Risk Transactions": {
+      "main": [
+        [
+          { "node": "Format Alert Message", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Alert Message": {
+      "main": [
+        [
+          { "node": "Send Anomaly Alert", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Max Retries?": {
+      "main": [
+        [
+          { "node": "Send Timeout Alert", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Wait Before Poll", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "tags": [],
+  "active": false
+}

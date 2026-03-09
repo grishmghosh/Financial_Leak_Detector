@@ -1,0 +1,370 @@
+{
+  "name": "LeakWatch ML Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "notes": "Triggers the LeakWatch ML analysis pipeline daily at 06:00 UTC. Adjust the cron expression for different schedules (e.g., '0 */6 * * *' for every 6 hours)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/v1/ml/run-analysis",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LEAKWATCH_JWT_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000002",
+      "name": "Run Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "notes": "POST /api/v1/ml/run-analysis — Triggers a background ML scoring run. Returns { run_id, status: 'running' }. Requires admin-role JWT. Body can include optional filters: start_date, end_date, department."
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000003",
+      "name": "Wait Before Poll",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [680, 300],
+      "notes": "Pauses 30 seconds between each status poll to give the ML pipeline time to process. Forms part of the polling loop (max 20 iterations = 10 min ceiling)."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8000/api/v1/ml/run-status/{{ $('Run Analysis').first().json.run_id }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LEAKWATCH_JWT_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000004",
+      "name": "Check Run Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300],
+      "notes": "GET /api/v1/ml/run-status/{run_id} — Polls the analysis run status. Returns: run_id, status ('running'|'completed'|'failed'), transactions_scored, high_risk_count, duplicates_found."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Track polling iteration count and merge with status response\nlet pollCount = 0;\ntry {\n  const prev = $('Track Poll Count').first().json;\n  pollCount = (prev.poll_count || 0) + 1;\n} catch {\n  // First iteration — node has no prior execution\n  pollCount = 1;\n}\n\nconst statusData = $input.first().json;\n\nreturn [{\n  json: {\n    run_id: statusData.run_id,\n    status: statusData.status,\n    high_risk_count: statusData.high_risk_count ?? 0,\n    transactions_scored: statusData.transactions_scored ?? 0,\n    duplicates_found: statusData.duplicates_found ?? 0,\n    started_at: statusData.started_at ?? null,\n    completed_at: statusData.completed_at ?? null,\n    poll_count: pollCount\n  }\n}];"
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000005",
+      "name": "Track Poll Count",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300],
+      "notes": "Merges the HTTP status response with a poll iteration counter. On first pass the self-reference throws, so pollCount defaults to 1. Prevents infinite loops by feeding poll_count to the Max Retries check downstream."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-is-complete",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000006",
+      "name": "Is Analysis Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 300],
+      "notes": "Branches on status == 'completed'. TRUE → evaluate results. FALSE → check if max retries reached."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-max-retries",
+              "leftValue": "={{ $json.poll_count }}",
+              "rightValue": 20,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000007",
+      "name": "Max Retries Reached?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 540],
+      "notes": "Safety guard: if poll_count >= 20 (10 minutes elapsed), stop polling and fire a timeout alert. FALSE loops back to Wait Before Poll for another 30-second cycle."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-has-anomalies",
+              "leftValue": "={{ $json.high_risk_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000008",
+      "name": "Has Anomalies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1620, 300],
+      "notes": "Checks if high_risk_count > 0. TRUE → fetch detail and alert. FALSE → no action needed."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/v1/dashboard/high-risk-transactions",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LEAKWATCH_JWT_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000009",
+      "name": "Fetch High Risk Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 200],
+      "notes": "GET /api/v1/dashboard/high-risk-transactions — Retrieves detailed high-risk transaction records including voucher numbers, leak probabilities, risk factors, and duplicate flags."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Format the anomaly alert for notification\nconst runData = $('Track Poll Count').first().json;\nconst transactions = $input.all().map(item => item.json);\nconst topTxns = transactions.slice(0, 10);\n\nconst lines = [\n  '🚨 *LeakWatch Anomaly Alert*',\n  '',\n  `Analysis Run: ${runData.run_id}`,\n  `Completed: ${runData.completed_at || 'N/A'}`,\n  `Transactions Scored: ${runData.transactions_scored}`,\n  `High Risk Found: ${runData.high_risk_count}`,\n  `Duplicates Found: ${runData.duplicates_found}`,\n  '',\n  '*Top High-Risk Transactions:*'\n];\n\nfor (const txn of topTxns) {\n  const factors = (txn.risk_factors || []).join(', ');\n  lines.push(\n    `• ${txn.voucher_number} — P=${(txn.leak_probability || 0).toFixed(3)} [${factors}]${txn.is_duplicate ? ' ⚠️ DUPLICATE' : ''}`\n  );\n}\n\nlines.push('', 'Review immediately in the LeakWatch dashboard.');\n\nreturn [{\n  json: {\n    text: lines.join('\\n'),\n    summary: `LeakWatch detected ${runData.high_risk_count} high-risk transactions out of ${runData.transactions_scored} scored.`,\n    run_id: runData.run_id,\n    high_risk_count: runData.high_risk_count,\n    transactions_scored: runData.transactions_scored,\n    duplicates_found: runData.duplicates_found,\n    top_transactions: topTxns\n  }\n}];"
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000010",
+      "name": "Format Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2120, 200],
+      "notes": "Builds a human-readable alert message with run summary and up to 10 top high-risk transactions. Output fields: text (formatted message), summary (one-liner), top_transactions (array)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.text) }},\n  \"summary\": {{ JSON.stringify($json.summary) }},\n  \"high_risk_count\": {{ $json.high_risk_count }},\n  \"transactions_scored\": {{ $json.transactions_scored }}\n}",
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000011",
+      "name": "Send Alert Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2360, 200],
+      "notes": "Sends alert via webhook (Slack, Discord, Teams, or custom). Set the ALERT_WEBHOOK_URL environment variable in n8n. Replace this node with an Email Send, Slack, or Teams node for native integration."
+    },
+    {
+      "parameters": {},
+      "id": "b8f3a1e0-0001-4a00-b000-000000000012",
+      "name": "No Anomalies Detected",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1880, 440],
+      "notes": "No high-risk transactions found. Workflow ends cleanly."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"⏰ LeakWatch Timeout: ML analysis did not complete within 10 minutes. Run ID: {{ $json.run_id }}. Last status: {{ $json.status }}. Please check the backend logs.\",\n  \"severity\": \"warning\"\n}",
+        "options": {}
+      },
+      "id": "b8f3a1e0-0001-4a00-b000-000000000013",
+      "name": "Send Timeout Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1620, 700],
+      "notes": "Fires if the analysis run does not complete within 20 × 30s = 10 minutes. Notifies ops team to investigate the backend."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          { "node": "Run Analysis", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Run Analysis": {
+      "main": [
+        [
+          { "node": "Wait Before Poll", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Wait Before Poll": {
+      "main": [
+        [
+          { "node": "Check Run Status", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Check Run Status": {
+      "main": [
+        [
+          { "node": "Track Poll Count", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Track Poll Count": {
+      "main": [
+        [
+          { "node": "Is Analysis Complete?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Is Analysis Complete?": {
+      "main": [
+        [
+          { "node": "Has Anomalies?", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Max Retries Reached?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Max Retries Reached?": {
+      "main": [
+        [
+          { "node": "Send Timeout Alert", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Wait Before Poll", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Has Anomalies?": {
+      "main": [
+        [
+          { "node": "Fetch High Risk Transactions", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "No Anomalies Detected", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch High Risk Transactions": {
+      "main": [
+        [
+          { "node": "Format Alert Message", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Alert Message": {
+      "main": [
+        [
+          { "node": "Send Alert Notification", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "active": false
+}
