@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 revision: str = "0003"
 down_revision: Union[str, None] = "0002"
@@ -17,10 +18,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "transactions",
-        sa.Column("vendor_name", sa.Text(), nullable=True),
-    )
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    columns = [c["name"] for c in inspector.get_columns("transactions")]
+    if "vendor_name" not in columns:
+        op.add_column(
+            "transactions",
+            sa.Column("vendor_name", sa.Text(), nullable=True),
+        )
 
 
 def downgrade() -> None:

@@ -22,7 +22,7 @@ def upgrade() -> None:
     op.create_table(
         "analysis_runs",
         sa.Column("id", UUID(), server_default=sa.text("gen_random_uuid()"), primary_key=True),
-        sa.Column("org_id", UUID(), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column("org_id", sa.Text(), sa.ForeignKey("organizations.org_id"), nullable=False),
         sa.Column("triggered_by", UUID(), nullable=True),
         sa.Column("trigger_source", sa.Text(), nullable=True),
         sa.Column("status", sa.Text(), server_default="running", nullable=False),
@@ -37,7 +37,7 @@ def upgrade() -> None:
     op.create_table(
         "analysis_results",
         sa.Column("id", UUID(), server_default=sa.text("gen_random_uuid()"), primary_key=True),
-        sa.Column("org_id", UUID(), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column("org_id", sa.Text(), sa.ForeignKey("organizations.org_id"), nullable=False),
         sa.Column("run_id", UUID(), sa.ForeignKey("analysis_runs.id"), nullable=False),
         sa.Column("voucher_number", sa.Text(), nullable=False),
         sa.Column("leak_probability", sa.Float(), nullable=True),
@@ -51,7 +51,7 @@ def upgrade() -> None:
     op.create_table(
         "vendor_risk_scores",
         sa.Column("id", UUID(), server_default=sa.text("gen_random_uuid()"), primary_key=True),
-        sa.Column("org_id", UUID(), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column("org_id", sa.Text(), sa.ForeignKey("organizations.org_id"), nullable=False),
         sa.Column("run_id", UUID(), sa.ForeignKey("analysis_runs.id"), nullable=False),
         sa.Column("vendor_name", sa.Text(), nullable=False),
         sa.Column("total_spend", sa.Numeric(), nullable=True),
@@ -64,7 +64,7 @@ def upgrade() -> None:
     op.create_table(
         "department_risk_scores",
         sa.Column("id", UUID(), server_default=sa.text("gen_random_uuid()"), primary_key=True),
-        sa.Column("org_id", UUID(), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column("org_id", sa.Text(), sa.ForeignKey("organizations.org_id"), nullable=False),
         sa.Column("run_id", UUID(), sa.ForeignKey("analysis_runs.id"), nullable=False),
         sa.Column("department", sa.Text(), nullable=False),
         sa.Column("monthly_spend", sa.Numeric(), nullable=True),
