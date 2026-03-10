@@ -1,0 +1,21 @@
+services:
+  backend:
+    build: .
+    container_name: leakwatch
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n
+    container_name: leakwatch_n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+volumes:
+  n8n_data:

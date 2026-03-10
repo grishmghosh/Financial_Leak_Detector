@@ -10,6 +10,17 @@ def require_role(required_role: str):
         user: dict = Depends(get_current_user),
         db: asyncpg.Connection = Depends(get_db),
     ) -> dict:
+        # ── TEMPORARY DEV BYPASS for Swagger testing ─────────────────
+        # Skip DB role lookup when the dev bypass user is active.
+        # TODO: Remove this bypass before deploying to staging/production.
+        if user.get("user_id") == "00000000-0000-0000-0000-000000000000":
+            return {
+                "user_id": user["user_id"],
+                "org_id": user["org_id"],
+                "role": required_role,
+            }
+        # ── END TEMPORARY DEV BYPASS ─────────────────────────────────
+
         row = await db.fetchrow(
             "SELECT org_id, role FROM user_organizations WHERE user_id = $1",
             user["user_id"],

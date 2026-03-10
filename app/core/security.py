@@ -23,6 +23,16 @@ async def get_current_user(request: Request) -> dict:
         HTTPException 401 – missing/malformed header, invalid token,
                             or missing "sub" claim.
     """
+    # ── TEMPORARY DEV BYPASS for Swagger testing ─────────────────────
+    # Allows /api/v1/ml/run-analysis to be called without a JWT.
+    # TODO: Remove this bypass before deploying to staging/production.
+    if request.url.path.startswith("/api/v1/ml/run-analysis"):
+        return {
+            "user_id": "00000000-0000-0000-0000-000000000000",
+            "org_id": "00000000-0000-0000-0000-000000000000",
+        }
+    # ── END TEMPORARY DEV BYPASS ─────────────────────────────────────
+
     auth_header: str | None = request.headers.get("Authorization")
 
     if not auth_header:
